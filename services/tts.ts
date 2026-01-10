@@ -1,5 +1,9 @@
-import { SignJWT, importPKCS8 } from 'jose';
-import credentials from './service-account.json';
+// import credentials from './service-account.json';
+// NOTE: Google Cloud Service Account JSON cannot be imported in client-side code securely 
+// and has been removed from the repository. All TTS now defaults to Browser Native API.
+
+// If you want to use Google Cloud TTS, you would need a backend proxy to handle auth.
+// For this demo, we will use window.speechSynthesis (Web Speech API).
 
 type VoiceConfig = {
   languageCode?: string;
@@ -7,61 +11,9 @@ type VoiceConfig = {
   ssmlGender?: 'MALE' | 'FEMALE' | 'NEUTRAL';
 };
 
-let cachedToken: string | null = null;
-let tokenExpiry: number | null = null;
-
 async function getAccessToken(): Promise<string> {
-  // Return cached token if still valid (minus 1 min buffer)
-  if (cachedToken && tokenExpiry && Date.now() < tokenExpiry) {
-    return cachedToken;
-  }
-
-  try {
-    const { client_email, private_key, token_uri } = credentials;
-
-    // Import the private key
-    // The private key in the JSON includes \n, which jose handles correctly
-    const privateKey = await importPKCS8(private_key, 'RS256');
-
-    // Create a signed JWT for OAuth2
-    const jwt = await new SignJWT({
-      scope: 'https://www.googleapis.com/auth/cloud-platform'
-    })
-      .setProtectedHeader({ alg: 'RS256' })
-      .setIssuer(client_email)
-      .setAudience(token_uri)
-      .setExpirationTime('1h')
-      .setIssuedAt()
-      .sign(privateKey);
-
-    // Exchange JWT for Access Token
-    const response = await fetch(token_uri, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/x-www-form-urlencoded',
-      },
-      body: new URLSearchParams({
-        grant_type: 'urn:ietf:params:oauth:grant-type:jwt-bearer',
-        assertion: jwt,
-      }),
-    });
-
-    if (!response.ok) {
-      const errorText = await response.text();
-      console.error('Token fetch error:', errorText);
-      throw new Error(`Failed to authenticate with Service Account: ${response.status}`);
-    }
-
-    const data = await response.json();
-    cachedToken = data.access_token;
-    // Set expiry based on response (usually 3600s), subtract buffer
-    tokenExpiry = Date.now() + (data.expires_in * 1000) - 30000;
-
-    return cachedToken!;
-  } catch (error) {
-    console.error('Error getting access token:', error);
-    throw error;
-  }
+  // Placeholder for backend token retrieval if implemented later
+  return "";
 }
 
 export async function synthesizeSpeech(
@@ -73,46 +25,36 @@ export async function synthesizeSpeech(
   }: VoiceConfig = {}
 ): Promise<string> {
   try {
-    const accessToken = await getAccessToken();
+    // FALLBACK: Use Web Speech API (Browser Native)
+    // Since we cannot safely expose Google Cloud keys in a client-side Vite app,
+    // we use the browser's built-in TTS which is free and requires no keys.
 
-    const endpoint = `https://texttospeech.googleapis.com/v1/text:synthesize`;
+    console.log(`TTS (Native): Speaking "${text}"`);
 
-    const body = {
-      input: { text },
-      voice: {
-        languageCode,
-        ssmlGender,
-        ...(name ? { name } : {}),
-      },
-      audioConfig: {
-        audioEncoding: 'MP3',
-        speakingRate: 1.0,
-        pitch: 0.0,
-      },
-    };
+    // Cancel any current speech
+    window.speechSynthesis.cancel();
 
-    const response = await fetch(endpoint, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'Authorization': `Bearer ${accessToken}`, // Use Bearer token
-      },
-      body: JSON.stringify(body),
-    });
+    const utterance = new SpeechSynthesisUtterance(text);
+    // utterance.lang = languageCode; // e.g. 'en-US'
+    // utterance.rate = 1.0;
 
-    if (!response.ok) {
-      const errText = await response.text().catch(() => '');
-      throw new Error(`TTS request failed (${response.status}): ${errText}`);
-    }
+    // Simple basic voice selection if possible
+    const voices = window.speechSynthesis.getVoices();
+    const voice = voices.find(v => v.name.includes('Female') || v.name.includes('Google')) || voices[0];
+    if (voice) utterance.voice = voice;
 
-    const data = await response.json();
-    const audioContent = data?.audioContent;
-    if (!audioContent) {
-      throw new Error('No audio content returned from TTS.');
-    }
+    // We wrap this in a promise to simulate the async nature, 
+    // but the caller expects a URL to *play*. 
+    // Since we can't get a URL from speechSyn, we play it HERE, 
+    // and return a silent audio URL to satisfy the caller's `<audio>` requirement.
 
-    // Return data URL for quick playback
-    return `data:audio/mp3;base64,${audioContent}`;
+    window.speechSynthesis.speak(utterance);
+
+    // 1-second of silence MP3 (base64) to prevent errors in caller
+    const silentMp3 = "data:audio/mp3;base64,SUQzBAAAAAAAI1RTSVMAAAAPAAADTGF2ZjU4LjI5LjEwMAAAAAAAAAAAAAAA//OEAAAAAAAAAAAAAAAAAAAAAAAASW5mbwAAAA8AAAAEAAABIADAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAw//OEAAAAAAAAAAAAAAAAAAAAAAAATGF2YzU4LjU0LjEwMAAAAAAAAAAAAAAAI1RTSVMAAAAPAAADTGF2ZjU4LjI5LjEwMAAAAAAAAAAAAAAA//OEAAAAAAAAAAAAAAAAAAAAAAAASW5mbwAAAA8AAAAEAAABIADAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAw";
+
+    return Promise.resolve(silentMp3);
+
   } catch (err) {
     console.error('TTS Synthesis Error:', err);
     throw err;
