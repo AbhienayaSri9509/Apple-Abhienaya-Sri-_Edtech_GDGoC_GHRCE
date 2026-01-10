@@ -1,0 +1,5 @@
+{
+  "name": "Lumina - Virtual Companion",
+  "description": "A 3D virtual girlfriend experience powered by Gemini 2.5 Flash and React Three Fiber.",
+  "requestFramePermissions": []
+}
